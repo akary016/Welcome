@@ -81,6 +81,17 @@ cur.execute(
     )
     """
 )
+for coluna, tipo in [
+    ("staff_message", "TEXT"),
+    ("announce_channel_id", "INTEGER"),
+    ("announce_interval_minutes", "INTEGER DEFAULT 60"),
+    ("announce_last_sent", "TEXT"),
+]:
+    try:
+        cur.execute(f"ALTER TABLE config ADD COLUMN {coluna} {tipo}")
+        conn.commit()
+    except Exception:
+        pass
 conn.commit()
 
 DEFAULT_STAFF_MESSAGE = "📋 Quer fazer parte da equipe? Entre na staff e ajude a construir a comunidade!"
