@@ -55,9 +55,8 @@ TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
 TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
 
 if TURSO_DATABASE_URL and libsql is not None:
-    conn = libsql.connect(DB_PATH, sync_url=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
-    conn.sync()
-    print("Conectado ao Turso (banco remoto persistente).")
+    conn = libsql.connect(database=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
+    print("Conectado ao Turso (conexão remota direta, sem cache local).")
 else:
     conn = sqlite3.connect(DB_PATH)
     print("TURSO_DATABASE_URL não definida — usando SQLite local (não persiste em deploys no Render).")
