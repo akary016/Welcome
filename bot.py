@@ -299,12 +299,31 @@ async def setstaffmsg(interaction: discord.Interaction, mensagem: str):
 
 # ---------- Anúncios automáticos ----------
 
+@bot.tree.command(name="verconfig", description="Mostra a configuração de anúncios salva no banco (admin)")
+@app_commands.checks.has_permissions(administrator=True)
+async def verconfig(interaction: discord.Interaction):
+    channel_id, interval_minutes, last_sent = get_announce_config(interaction.guild.id)
+    texto = (
+        f"**guild_id (servidor):** `{interaction.guild.id}`\n"
+        f"**announce_channel_id salvo:** `{channel_id}`\n"
+        f"**intervalo:** {interval_minutes} minutos\n"
+        f"**último envio:** {last_sent or 'nunca'}\n"
+    )
+    if channel_id:
+        canal_real = interaction.guild.get_channel(channel_id)
+        texto += f"**canal encontrado no cache?** {'✅ sim, ' + canal_real.mention if canal_real else '❌ não'}"
+    await interaction.response.send_message(texto, ephemeral=True)
+
+
 @bot.tree.command(name="setannouncechannel", description="Define o canal dos anúncios automáticos (admin)")
 @app_commands.describe(canal="Canal onde as mensagens aleatórias serão enviadas")
 @app_commands.checks.has_permissions(administrator=True)
 async def setannouncechannel(interaction: discord.Interaction, canal: discord.TextChannel):
     set_announce_channel(interaction.guild.id, canal.id)
-    embed = discord.Embed(description=f"✅ Canal de anúncios definido para {canal.mention}", color=COLOR_SUCCESS)
+    embed = discord.Embed(
+        description=f"✅ Canal de anúncios definido para {canal.mention}\nID salvo: `{canal.id}`",
+        color=COLOR_SUCCESS,
+    )
     await interaction.response.send_message(embed=embed)
 
 
