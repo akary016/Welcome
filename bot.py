@@ -241,8 +241,7 @@ async def announce_loop():
         embed = discord.Embed(description=content, color=COLOR_PRIMARY)
         embed.set_footer(text=BOT_FOOTER)
         try:
-            await channel.send(embed=embed)
-            print(f"[ANNOUNCE] Mensagem enviada no canal {channel_id} da guild {guild_id}")
+            await channel.send(embed=embed, delete_after=15)
         except Exception as e:
             print(f"[ANNOUNCE] ERRO ao enviar: {e}")
         set_announce_last_sent(guild_id, now)
@@ -405,7 +404,7 @@ async def testarannuncio(interaction: discord.Interaction):
     embed = discord.Embed(description=content, color=COLOR_PRIMARY)
     embed.set_footer(text=BOT_FOOTER)
     try:
-        await channel.send(embed=embed)
+        await channel.send(embed=embed, delete_after=15)
     except discord.Forbidden:
         await interaction.response.send_message(
             f"❌ Não tenho permissão de enviar mensagens em {channel.mention}. Confere as permissões do meu cargo nesse canal.",
