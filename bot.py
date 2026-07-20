@@ -1,5 +1,6 @@
 import os
 import random
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import timedelta, datetime, timezone
@@ -7,6 +8,8 @@ from datetime import timedelta, datetime, timezone
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+
+sys.stdout.reconfigure(line_buffering=True)
 
 try:
     import libsql
@@ -340,6 +343,43 @@ async def delannouncemsg(interaction: discord.Interaction, id: int):
     else:
         embed = discord.Embed(description=f"⚠️ Nenhuma mensagem encontrada com ID `{id}`.", color=COLOR_DANGER)
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="testarannuncio", description="Envia um anúncio agora mesmo, pra testar (admin)")
+@app_commands.checks.has_permissions(administrator=True)
+async def testarannuncio(interaction: discord.Interaction):
+    channel_id, _, _ = get_announce_config(interaction.guild.id)
+    if not channel_id:
+        await interaction.response.send_message(
+            "❌ Nenhum canal configurado ainda. Use /setannouncechannel primeiro.", ephemeral=True
+        )
+        return
+    channel = interaction.guild.get_channel(channel_id)
+    if not channel:
+        await interaction.response.send_message(
+            f"❌ O canal configurado (ID {channel_id}) não foi encontrado. Ele pode ter sido apagado — configure de novo com /setannouncechannel.",
+            ephemeral=True,
+        )
+        return
+    messages = list_announce_messages(interaction.guild.id)
+    if not messages:
+        await interaction.response.send_message(
+            "❌ Nenhuma mensagem cadastrada. Use /addannouncemsg primeiro.", ephemeral=True
+        )
+        return
+    _, content = random.choice(messages)
+    embed = discord.Embed(description=content, color=COLOR_PRIMARY)
+    embed.set_footer(text=BOT_FOOTER)
+    try:
+        await channel.send(embed=embed)
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            f"❌ Não tenho permissão de enviar mensagens em {channel.mention}. Confere as permissões do meu cargo nesse canal.",
+            ephemeral=True,
+        )
+        return
+    set_announce_last_sent(interaction.guild.id, datetime.now(timezone.utc))
+    await interaction.response.send_message(f"✅ Anúncio enviado em {channel.mention}!", ephemeral=True)
 
 
 # ---------- Moderação ----------
