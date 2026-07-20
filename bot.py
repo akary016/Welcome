@@ -1,11 +1,12 @@
 import os
+import random
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 try:
     import libsql
@@ -64,7 +65,19 @@ cur.execute(
     CREATE TABLE IF NOT EXISTS config (
         guild_id INTEGER PRIMARY KEY,
         welcome_channel_id INTEGER,
-        staff_message TEXT
+        staff_message TEXT,
+        announce_channel_id INTEGER,
+        announce_interval_minutes INTEGER DEFAULT 60,
+        announce_last_sent TEXT
+    )
+    """
+)
+cur.execute(
+    """
+    CREATE TABLE IF NOT EXISTS announce_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER,
+        content TEXT
     )
     """
 )
@@ -105,12 +118,109 @@ def set_staff_message(guild_id: int, message: str):
     conn.commit()
 
 
+# ---------- Anúncios automáticos ----------
+
+def set_announce_channel(guild_id: int, channel_id: int):
+    cur.execute(
+        "INSERT INTO config (guild_id, announce_channel_id) VALUES (?, ?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET announce_channel_id=?",
+        (guild_id, channel_id, channel_id),
+    )
+    conn.commit()
+
+
+def set_announce_interval(guild_id: int, minutes: int):
+    cur.execute(
+        "INSERT INTO config (guild_id, announce_interval_minutes) VALUES (?, ?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET announce_interval_minutes=?",
+        (guild_id, minutes, minutes),
+    )
+    conn.commit()
+
+
+def add_announce_message(guild_id: int, content: str):
+    cur.execute("INSERT INTO announce_messages (guild_id, content) VALUES (?, ?)", (guild_id, content))
+    conn.commit()
+
+
+def list_announce_messages(guild_id: int):
+    cur.execute("SELECT id, content FROM announce_messages WHERE guild_id=? ORDER BY id", (guild_id,))
+    return cur.fetchall()
+
+
+def remove_announce_message(guild_id: int, msg_id: int) -> bool:
+    cur.execute("DELETE FROM announce_messages WHERE guild_id=? AND id=?", (guild_id, msg_id))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def get_announce_config(guild_id: int):
+    cur.execute(
+        "SELECT announce_channel_id, announce_interval_minutes, announce_last_sent FROM config WHERE guild_id=?",
+        (guild_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None, 60, None
+    return row
+
+
+def set_announce_last_sent(guild_id: int, when: datetime):
+    cur.execute(
+        "UPDATE config SET announce_last_sent=? WHERE guild_id=?",
+        (when.isoformat(), guild_id),
+    )
+    conn.commit()
+
+
+def all_guild_ids_with_config():
+    cur.execute("SELECT guild_id FROM config WHERE announce_channel_id IS NOT NULL")
+    return [row[0] for row in cur.fetchall()]
+
+
 # ---------- Eventos ----------
 
 @bot.event
 async def on_ready():
     await bot.tree.sync()
+    if not announce_loop.is_running():
+        announce_loop.start()
     print(f"Bot conectado como {bot.user}")
+
+
+@tasks.loop(minutes=1)
+async def announce_loop():
+    now = datetime.now(timezone.utc)
+    for guild_id in all_guild_ids_with_config():
+        channel_id, interval_minutes, last_sent = get_announce_config(guild_id)
+        if not channel_id:
+            continue
+        messages = list_announce_messages(guild_id)
+        if not messages:
+            continue
+        if last_sent:
+            elapsed = now - datetime.fromisoformat(last_sent)
+            if elapsed < timedelta(minutes=interval_minutes):
+                continue
+        guild = bot.get_guild(guild_id)
+        if not guild:
+            continue
+        channel = guild.get_channel(channel_id)
+        if not channel:
+            continue
+        _, content = random.choice(messages)
+        embed = discord.Embed(description=content, color=COLOR_PRIMARY)
+        embed.set_footer(text=BOT_FOOTER)
+        try:
+            await channel.send(embed=embed)
+        except discord.Forbidden:
+            pass
+        set_announce_last_sent(guild_id, now)
+
+
+@announce_loop.before_loop
+async def before_announce_loop():
+    await bot.wait_until_ready()
 
 
 @bot.event
@@ -151,6 +261,59 @@ async def setstaffmsg(interaction: discord.Interaction, mensagem: str):
         color=COLOR_SUCCESS,
     )
     await interaction.response.send_message(embed=embed)
+
+
+# ---------- Anúncios automáticos ----------
+
+@bot.tree.command(name="setannouncechannel", description="Define o canal dos anúncios automáticos (admin)")
+@app_commands.describe(canal="Canal onde as mensagens aleatórias serão enviadas")
+@app_commands.checks.has_permissions(administrator=True)
+async def setannouncechannel(interaction: discord.Interaction, canal: discord.TextChannel):
+    set_announce_channel(interaction.guild.id, canal.id)
+    embed = discord.Embed(description=f"✅ Canal de anúncios definido para {canal.mention}", color=COLOR_SUCCESS)
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="setannounceinterval", description="Define de quantos em quantos minutos manda um anúncio (admin)")
+@app_commands.describe(minutos="Intervalo em minutos entre cada anúncio")
+@app_commands.checks.has_permissions(administrator=True)
+async def setannounceinterval(interaction: discord.Interaction, minutos: app_commands.Range[int, 1, 10080]):
+    set_announce_interval(interaction.guild.id, minutos)
+    embed = discord.Embed(description=f"✅ Intervalo definido para **{minutos} minutos**.", color=COLOR_SUCCESS)
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="addannouncemsg", description="Adiciona uma mensagem à lista de anúncios (admin)")
+@app_commands.describe(mensagem="Texto da mensagem, ex: Seja staff! Candidate-se em #recrutamento")
+@app_commands.checks.has_permissions(administrator=True)
+async def addannouncemsg(interaction: discord.Interaction, mensagem: str):
+    add_announce_message(interaction.guild.id, mensagem)
+    embed = discord.Embed(description=f"✅ Mensagem adicionada:\n\n{mensagem}", color=COLOR_SUCCESS)
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="listannouncemsgs", description="Lista as mensagens de anúncio cadastradas (admin)")
+@app_commands.checks.has_permissions(administrator=True)
+async def listannouncemsgs(interaction: discord.Interaction):
+    rows = list_announce_messages(interaction.guild.id)
+    if not rows:
+        await interaction.response.send_message("Nenhuma mensagem cadastrada ainda. Use /addannouncemsg.", ephemeral=True)
+        return
+    linhas = [f"`{msg_id}` — {content}" for msg_id, content in rows]
+    embed = discord.Embed(title="📋 Mensagens de anúncio", description="\n".join(linhas), color=COLOR_PRIMARY)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="delannouncemsg", description="Remove uma mensagem de anúncio pelo ID (admin)")
+@app_commands.describe(id="ID da mensagem (veja em /listannouncemsgs)")
+@app_commands.checks.has_permissions(administrator=True)
+async def delannouncemsg(interaction: discord.Interaction, id: int):
+    ok = remove_announce_message(interaction.guild.id, id)
+    if ok:
+        embed = discord.Embed(description=f"🗑️ Mensagem `{id}` removida.", color=COLOR_SUCCESS)
+    else:
+        embed = discord.Embed(description=f"⚠️ Nenhuma mensagem encontrada com ID `{id}`.", color=COLOR_DANGER)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ---------- Moderação ----------
