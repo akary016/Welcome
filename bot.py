@@ -65,10 +65,10 @@ cur = conn.cursor()
 cur.execute(
     """
     CREATE TABLE IF NOT EXISTS config (
-        guild_id INTEGER PRIMARY KEY,
-        welcome_channel_id INTEGER,
+        guild_id TEXT PRIMARY KEY,
+        welcome_channel_id TEXT,
         staff_message TEXT,
-        announce_channel_id INTEGER,
+        announce_channel_id TEXT,
         announce_interval_minutes INTEGER DEFAULT 60,
         announce_last_sent TEXT
     )
@@ -78,14 +78,14 @@ cur.execute(
     """
     CREATE TABLE IF NOT EXISTS announce_messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id INTEGER,
+        guild_id TEXT,
         content TEXT
     )
     """
 )
 for coluna, tipo in [
     ("staff_message", "TEXT"),
-    ("announce_channel_id", "INTEGER"),
+    ("announce_channel_id", "TEXT"),
     ("announce_interval_minutes", "INTEGER DEFAULT 60"),
     ("announce_last_sent", "TEXT"),
 ]:
@@ -100,12 +100,13 @@ DEFAULT_STAFF_MESSAGE = "📋 Quer fazer parte da equipe? Entre na staff e ajude
 
 
 def get_welcome_channel(guild_id: int):
-    cur.execute("SELECT welcome_channel_id FROM config WHERE guild_id=?", (guild_id,))
+    cur.execute("SELECT welcome_channel_id FROM config WHERE guild_id=?", (str(guild_id),))
     row = cur.fetchone()
-    return row[0] if row else None
+    return int(row[0]) if row and row[0] else None
 
 
 def set_welcome_channel(guild_id: int, channel_id: int):
+    guild_id, channel_id = str(guild_id), str(channel_id)
     cur.execute(
         "INSERT INTO config (guild_id, welcome_channel_id) VALUES (?, ?) "
         "ON CONFLICT(guild_id) DO UPDATE SET welcome_channel_id=?",
@@ -115,7 +116,7 @@ def set_welcome_channel(guild_id: int, channel_id: int):
 
 
 def get_staff_message(guild_id: int):
-    cur.execute("SELECT staff_message FROM config WHERE guild_id=?", (guild_id,))
+    cur.execute("SELECT staff_message FROM config WHERE guild_id=?", (str(guild_id),))
     row = cur.fetchone()
     if row and row[0]:
         return row[0]
@@ -123,6 +124,7 @@ def get_staff_message(guild_id: int):
 
 
 def set_staff_message(guild_id: int, message: str):
+    guild_id = str(guild_id)
     cur.execute(
         "INSERT INTO config (guild_id, staff_message) VALUES (?, ?) "
         "ON CONFLICT(guild_id) DO UPDATE SET staff_message=?",
@@ -134,6 +136,7 @@ def set_staff_message(guild_id: int, message: str):
 # ---------- Anúncios automáticos ----------
 
 def set_announce_channel(guild_id: int, channel_id: int):
+    guild_id, channel_id = str(guild_id), str(channel_id)
     cur.execute(
         "INSERT INTO config (guild_id, announce_channel_id) VALUES (?, ?) "
         "ON CONFLICT(guild_id) DO UPDATE SET announce_channel_id=?",
@@ -146,23 +149,23 @@ def set_announce_interval(guild_id: int, minutes: int):
     cur.execute(
         "INSERT INTO config (guild_id, announce_interval_minutes) VALUES (?, ?) "
         "ON CONFLICT(guild_id) DO UPDATE SET announce_interval_minutes=?",
-        (guild_id, minutes, minutes),
+        (str(guild_id), minutes, minutes),
     )
     conn.commit()
 
 
 def add_announce_message(guild_id: int, content: str):
-    cur.execute("INSERT INTO announce_messages (guild_id, content) VALUES (?, ?)", (guild_id, content))
+    cur.execute("INSERT INTO announce_messages (guild_id, content) VALUES (?, ?)", (str(guild_id), content))
     conn.commit()
 
 
 def list_announce_messages(guild_id: int):
-    cur.execute("SELECT id, content FROM announce_messages WHERE guild_id=? ORDER BY id", (guild_id,))
+    cur.execute("SELECT id, content FROM announce_messages WHERE guild_id=? ORDER BY id", (str(guild_id),))
     return cur.fetchall()
 
 
 def remove_announce_message(guild_id: int, msg_id: int) -> bool:
-    cur.execute("DELETE FROM announce_messages WHERE guild_id=? AND id=?", (guild_id, msg_id))
+    cur.execute("DELETE FROM announce_messages WHERE guild_id=? AND id=?", (str(guild_id), msg_id))
     conn.commit()
     return cur.rowcount > 0
 
@@ -170,25 +173,26 @@ def remove_announce_message(guild_id: int, msg_id: int) -> bool:
 def get_announce_config(guild_id: int):
     cur.execute(
         "SELECT announce_channel_id, announce_interval_minutes, announce_last_sent FROM config WHERE guild_id=?",
-        (guild_id,),
+        (str(guild_id),),
     )
     row = cur.fetchone()
     if not row:
         return None, 60, None
-    return row
+    channel_id, interval, last_sent = row
+    return (int(channel_id) if channel_id else None), (interval or 60), last_sent
 
 
 def set_announce_last_sent(guild_id: int, when: datetime):
     cur.execute(
         "UPDATE config SET announce_last_sent=? WHERE guild_id=?",
-        (when.isoformat(), guild_id),
+        (when.isoformat(), str(guild_id)),
     )
     conn.commit()
 
 
 def all_guild_ids_with_config():
     cur.execute("SELECT guild_id FROM config WHERE announce_channel_id IS NOT NULL")
-    return [row[0] for row in cur.fetchall()]
+    return [int(row[0]) for row in cur.fetchall()]
 
 
 # ---------- Eventos ----------
