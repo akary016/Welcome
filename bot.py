@@ -202,36 +202,51 @@ async def on_ready():
 @tasks.loop(minutes=1)
 async def announce_loop():
     now = datetime.now(timezone.utc)
-    for guild_id in all_guild_ids_with_config():
+    guild_ids = all_guild_ids_with_config()
+    print(f"[ANNOUNCE] Ciclo rodando. Guilds com canal configurado: {guild_ids}")
+    for guild_id in guild_ids:
         channel_id, interval_minutes, last_sent = get_announce_config(guild_id)
+        print(f"[ANNOUNCE] guild={guild_id} canal={channel_id} intervalo={interval_minutes} ultimo_envio={last_sent}")
         if not channel_id:
             continue
         messages = list_announce_messages(guild_id)
+        print(f"[ANNOUNCE] guild={guild_id} mensagens_cadastradas={len(messages)}")
         if not messages:
             continue
         if last_sent:
             elapsed = now - datetime.fromisoformat(last_sent)
+            print(f"[ANNOUNCE] guild={guild_id} tempo_passado={elapsed} necessario={timedelta(minutes=interval_minutes)}")
             if elapsed < timedelta(minutes=interval_minutes):
                 continue
         guild = bot.get_guild(guild_id)
         if not guild:
+            print(f"[ANNOUNCE] guild={guild_id} NÃO encontrada no cache do bot")
             continue
         channel = guild.get_channel(channel_id)
         if not channel:
+            print(f"[ANNOUNCE] canal={channel_id} NÃO encontrado na guild {guild_id}")
             continue
         _, content = random.choice(messages)
         embed = discord.Embed(description=content, color=COLOR_PRIMARY)
         embed.set_footer(text=BOT_FOOTER)
         try:
             await channel.send(embed=embed)
-        except discord.Forbidden:
-            pass
+            print(f"[ANNOUNCE] Mensagem enviada no canal {channel_id} da guild {guild_id}")
+        except Exception as e:
+            print(f"[ANNOUNCE] ERRO ao enviar: {e}")
         set_announce_last_sent(guild_id, now)
 
 
 @announce_loop.before_loop
 async def before_announce_loop():
     await bot.wait_until_ready()
+
+
+@announce_loop.error
+async def announce_loop_error(error):
+    print(f"[ANNOUNCE] ERRO FATAL no loop, reiniciando: {error}")
+    if not announce_loop.is_running():
+        announce_loop.restart()
 
 
 @bot.event
