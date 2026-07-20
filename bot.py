@@ -227,6 +227,11 @@ async def announce_loop():
             continue
         channel = guild.get_channel(channel_id)
         if not channel:
+            try:
+                channel = await guild.fetch_channel(channel_id)
+            except (discord.NotFound, discord.Forbidden):
+                channel = None
+        if not channel:
             print(f"[ANNOUNCE] canal={channel_id} NÃO encontrado na guild {guild_id}")
             continue
         _, content = random.choice(messages)
@@ -356,8 +361,15 @@ async def testarannuncio(interaction: discord.Interaction):
         return
     channel = interaction.guild.get_channel(channel_id)
     if not channel:
+        try:
+            channel = await interaction.guild.fetch_channel(channel_id)
+        except (discord.NotFound, discord.Forbidden):
+            channel = None
+    if not channel:
         await interaction.response.send_message(
-            f"❌ O canal configurado (ID {channel_id}) não foi encontrado. Ele pode ter sido apagado — configure de novo com /setannouncechannel.",
+            f"❌ O canal salvo (ID `{channel_id}`) não foi encontrado nem pelo cache nem pela API do Discord. "
+            f"Confirma esse ID comparando com o canal real (clique direito no canal → Copiar ID). "
+            f"Se for diferente, configure de novo com /setannouncechannel.",
             ephemeral=True,
         )
         return
